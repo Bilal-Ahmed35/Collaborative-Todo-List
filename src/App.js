@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./Firebase/firebase";
-import SignIn from "//pages/SignIn";
-import Dashboard from "//pages/Dashboard";
+import SignIn from "./PAGES/SignIn";
+import Dashboard from "./PAGES/Dashboard";
 
 export default function App() {
   const [user, setUser] = useState(null);
