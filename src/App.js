@@ -1,33 +1,25 @@
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./Firebase/firebase";
-import SignIn from "./PAGES/SignIn";
-import Dashboard from "./PAGES/Dashboard";
+
+import SignIn from "./Pages/SignIn";
+import Dashboard from "./Pages/Dashboard";
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setReady(true);
     });
+
+    return () => unsubscribe();
   }, []);
 
-  if (!ready) return <div>Loading…</div>;
+  if (!ready) return <div>Loading...</div>;
   if (!user) return <SignIn />;
 
-  return (
-    <>
-      <header
-        style={{ display: "flex", gap: 12, alignItems: "center", padding: 12 }}
-      >
-        <strong>Collab Todo</strong>
-        <span style={{ marginLeft: "auto" }}>{user.displayName}</span>
-        <button onClick={() => signOut(auth)}>Sign out</button>
-      </header>
-      <Dashboard user={user} />
-    </>
-  );
+  return <Dashboard user={user} onSignOut={() => signOut(auth)} />;
 }
