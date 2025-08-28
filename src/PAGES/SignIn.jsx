@@ -1,4 +1,4 @@
-import { auth, googleProvider, db } from "./firebase";
+import { auth, googleProvider, db } from "../Firebase/firebase";
 import { signInWithPopup } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
