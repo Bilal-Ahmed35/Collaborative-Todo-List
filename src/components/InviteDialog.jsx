@@ -13,9 +13,20 @@ import {
   Typography,
   Alert,
   Box,
+  Divider,
+  IconButton,
+  Tooltip,
 } from "@mui/material";
-// Import the email service
-import { sendInvitationEmail } from "../services/emailService";
+import {
+  ContentCopy as CopyIcon,
+  Share as ShareIcon,
+  Email as EmailIcon,
+} from "@mui/icons-material";
+import {
+  sendInvitationEmail,
+  shareInvitationLink,
+  isEmailServiceAvailable,
+} from "../services/emailService";
 
 export default function InviteDialog({
   inviteOpen,
@@ -30,8 +41,14 @@ export default function InviteDialog({
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
   const [loading, setLoading] = useState(false);
+  const [inviteMethod, setInviteMethod] = useState("email"); // 'email', 'link'
 
   const userRole = getUserRole(activeListId);
+
+  const validateEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
 
   const handleInviteMember = async () => {
     if (!inviteEmail.trim()) {
@@ -39,18 +56,13 @@ export default function InviteDialog({
       return;
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(inviteEmail.trim())) {
+    if (!validateEmail(inviteEmail.trim())) {
       showSnackbar("Please enter a valid email address", "error");
       return;
     }
 
     // Check if user is already a member
-    const existingMember = currentList?.memberIds?.find(
-      (memberId) => memberId === inviteEmail.trim()
-    );
-    if (existingMember) {
+    if (currentList?.memberIds?.includes(inviteEmail.trim())) {
       showSnackbar("User is already a member of this list", "error");
       return;
     }
@@ -72,26 +84,48 @@ export default function InviteDialog({
       // First, add member to the database
       await inviteMember(activeListId, inviteEmail.trim(), inviteRole);
 
-      // Then send the invitation email
-      try {
-        await sendInvitationEmail({
-          email: inviteEmail.trim(),
-          listName: currentList?.name || "Untitled List",
-          invitedByName: user?.displayName || user?.email || "Someone",
-          role: inviteRole,
-          listId: activeListId,
-        });
-        showSnackbar(
-          "Invitation sent successfully! Email has been sent.",
-          "success"
-        );
-      } catch (emailError) {
-        console.error("Email sending failed:", emailError);
-        // Still show success for database operation, but mention email issue
-        showSnackbar(
-          "Member added successfully, but email sending failed. Please share the list manually.",
-          "warning"
-        );
+      // Then try to send notification based on method
+      const invitationData = {
+        email: inviteEmail.trim(),
+        listName: currentList?.name || "Untitled List",
+        invitedByName: user?.displayName || user?.email || "Someone",
+        role: inviteRole,
+        listId: activeListId,
+      };
+
+      if (inviteMethod === "email" && isEmailServiceAvailable()) {
+        try {
+          await sendInvitationEmail(invitationData);
+          showSnackbar(
+            "Invitation sent successfully! Email has been sent.",
+            "success"
+          );
+        } catch (emailError) {
+          console.error("Email sending failed:", emailError);
+          // Fall back to link sharing
+          const shareResult = await shareInvitationLink(invitationData);
+          if (shareResult.method === "clipboard") {
+            showSnackbar(
+              "Member added successfully. Invitation link copied to clipboard since email failed.",
+              "warning"
+            );
+          } else {
+            showSnackbar(
+              "Member added successfully, but email sending failed. Please share the invitation link manually.",
+              "warning"
+            );
+          }
+        }
+      } else {
+        // Use link sharing method
+        const shareResult = await shareInvitationLink(invitationData);
+        if (shareResult.method === "native-share") {
+          showSnackbar("Invitation shared successfully!", "success");
+        } else if (shareResult.method === "clipboard") {
+          showSnackbar("Invitation link copied to clipboard!", "success");
+        } else {
+          showSnackbar(`Invitation link: ${shareResult.url}`, "info");
+        }
       }
 
       handleClose();
@@ -103,9 +137,38 @@ export default function InviteDialog({
     }
   };
 
+  const generateInviteLink = () => {
+    return `${
+      window.location.origin
+    }/?invite=${activeListId}&email=${encodeURIComponent(inviteEmail)}`;
+  };
+
+  const copyInviteLink = async () => {
+    if (!inviteEmail.trim() || !validateEmail(inviteEmail.trim())) {
+      showSnackbar("Please enter a valid email address first", "error");
+      return;
+    }
+
+    const link = generateInviteLink();
+    try {
+      await navigator.clipboard.writeText(link);
+      showSnackbar("Invitation link copied to clipboard!", "success");
+    } catch (error) {
+      // Fallback for older browsers
+      const textArea = document.createElement("textarea");
+      textArea.value = link;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+      showSnackbar("Invitation link copied to clipboard!", "success");
+    }
+  };
+
   const handleClose = () => {
     setInviteEmail("");
     setInviteRole("editor");
+    setInviteMethod("email");
     setInviteOpen(false);
   };
 
@@ -121,6 +184,8 @@ export default function InviteDialog({
         return "";
     }
   };
+
+  const isEmailAvailable = isEmailServiceAvailable();
 
   return (
     <Dialog open={inviteOpen} onClose={handleClose} maxWidth="sm" fullWidth>
@@ -138,10 +203,11 @@ export default function InviteDialog({
         {userRole !== "viewer" && (
           <>
             <Typography variant="body2" color="text.secondary">
-              Send an invitation to collaborate on this list. The person will
-              receive an email with instructions to join.
+              Invite someone to collaborate on this list. They'll need to sign
+              in with the email address you specify.
             </Typography>
 
+            {/* Email Input */}
             <TextField
               label="Email Address *"
               value={inviteEmail}
@@ -149,17 +215,16 @@ export default function InviteDialog({
               fullWidth
               type="email"
               required
-              error={
-                inviteEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail)
-              }
+              error={inviteEmail && !validateEmail(inviteEmail)}
               helperText={
-                inviteEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail)
+                inviteEmail && !validateEmail(inviteEmail)
                   ? "Please enter a valid email address"
                   : "Enter the email address of the person you want to invite"
               }
               disabled={loading}
             />
 
+            {/* Role Selection */}
             <FormControl fullWidth>
               <InputLabel>Role</InputLabel>
               <Select
@@ -176,6 +241,7 @@ export default function InviteDialog({
               </Select>
             </FormControl>
 
+            {/* Role Description */}
             <Box sx={{ p: 2, bgcolor: "grey.100", borderRadius: 1 }}>
               <Typography variant="body2" fontWeight="bold" gutterBottom>
                 {inviteRole.charAt(0).toUpperCase() + inviteRole.slice(1)}{" "}
@@ -186,11 +252,74 @@ export default function InviteDialog({
               </Typography>
             </Box>
 
+            {/* Invitation Method Selection */}
+            <Box
+              sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 2 }}
+            >
+              <Typography variant="subtitle2" gutterBottom>
+                How would you like to send the invitation?
+              </Typography>
+
+              {isEmailAvailable ? (
+                <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                  <Button
+                    variant={
+                      inviteMethod === "email" ? "contained" : "outlined"
+                    }
+                    size="small"
+                    startIcon={<EmailIcon />}
+                    onClick={() => setInviteMethod("email")}
+                  >
+                    Send Email
+                  </Button>
+                  <Button
+                    variant={inviteMethod === "link" ? "contained" : "outlined"}
+                    size="small"
+                    startIcon={<ShareIcon />}
+                    onClick={() => setInviteMethod("link")}
+                  >
+                    Share Link
+                  </Button>
+                  <Tooltip title="Copy invitation link">
+                    <IconButton size="small" onClick={copyInviteLink}>
+                      <CopyIcon />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              ) : (
+                <Box>
+                  <Alert severity="info" sx={{ mb: 1 }}>
+                    Email service not configured. You can share the invitation
+                    link instead.
+                  </Alert>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<CopyIcon />}
+                    onClick={copyInviteLink}
+                    fullWidth
+                  >
+                    Copy Invitation Link
+                  </Button>
+                </Box>
+              )}
+            </Box>
+
+            {/* Instructions */}
             <Alert severity="info">
               <Typography variant="body2">
-                The invited person will receive an email with a link to join
-                this list. They'll need to sign up with this exact email address
-                to access it.
+                {inviteMethod === "email" && isEmailAvailable ? (
+                  <>
+                    The person will receive an email with instructions to join
+                    this list.
+                  </>
+                ) : (
+                  <>
+                    Share the invitation link with the person. They'll need to
+                    sign in with the exact email address you entered above to
+                    access the list.
+                  </>
+                )}
               </Typography>
             </Alert>
           </>
@@ -206,12 +335,14 @@ export default function InviteDialog({
             variant="contained"
             onClick={handleInviteMember}
             disabled={
-              !inviteEmail.trim() ||
-              !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail) ||
-              loading
+              !inviteEmail.trim() || !validateEmail(inviteEmail) || loading
             }
           >
-            {loading ? "Sending..." : "Send Invite"}
+            {loading
+              ? "Sending..."
+              : inviteMethod === "email" && isEmailAvailable
+              ? "Send Invite"
+              : "Create Invite"}
           </Button>
         )}
       </DialogActions>

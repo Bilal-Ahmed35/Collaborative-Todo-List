@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./Firebase/firebase";
+// import ErrorBoundary from "./components/ErrorBoundary";
 import LoginScreen from "./components/LoginScreen";
 import AppHeader from "./components/AppHeader";
 import Sidebar from "./components/Sidebar";
@@ -20,17 +21,21 @@ import InviteDialog from "./components/InviteDialog";
 import FilterMenu from "./components/FilterMenu";
 import SortMenu from "./components/SortMenu";
 import NotificationSnackbar from "./components/NotificationSnackbar";
+// import InvitationHandler from "./components/InvitationHandler";
 import { useFirebaseData } from "./hooks/useFirebaseData";
 
 const drawerWidth = 300;
 
-export default function CollaborativeTodoApp() {
+function AppContent() {
   // Authentication state
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
 
   // Theme and UI state
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem("darkMode");
+    return saved ? JSON.parse(saved) : false;
+  });
 
   const theme = createTheme({
     palette: {
@@ -60,6 +65,11 @@ export default function CollaborativeTodoApp() {
     },
   });
 
+  // Save dark mode preference
+  useEffect(() => {
+    localStorage.setItem("darkMode", JSON.stringify(darkMode));
+  }, [darkMode]);
+
   // Firebase data hook (only initialize when user is authenticated)
   const firebaseData = useFirebaseData(user);
 
@@ -81,7 +91,7 @@ export default function CollaborativeTodoApp() {
     showOverdue: false,
   });
   const [sortBy, setSortBy] = useState("createdAt");
-  const [sortOrder, setSortOrder] = useState("asc");
+  const [sortOrder, setSortOrder] = useState("desc");
   const [filterAnchor, setFilterAnchor] = useState(null);
   const [sortAnchor, setSortAnchor] = useState(null);
 
@@ -94,8 +104,10 @@ export default function CollaborativeTodoApp() {
   // Listen for auth state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("🔐 Auth state changed:", user ? "signed in" : "signed out");
       setUser(user);
-      setLoading(false);
+      setAuthLoading(false);
+
       if (!user) {
         // Clear all data when user signs out
         setActiveListId(null);
@@ -106,18 +118,21 @@ export default function CollaborativeTodoApp() {
         setInviteOpen(false);
         setTabValue(0);
         setEditingTask(null);
+        // Reset filters
+        setFilters({
+          status: "all",
+          priority: "all",
+          assignee: "all",
+          showOverdue: false,
+        });
       }
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Set initial active list when lists load - FIXED VERSION
+  // Set initial active list when lists load
   useEffect(() => {
-    // Only set active list if:
-    // 1. Firebase data has finished loading
-    // 2. We have lists available
-    // 3. No active list is currently set
     if (
       !firebaseData.loading &&
       firebaseData.lists.length > 0 &&
@@ -129,6 +144,7 @@ export default function CollaborativeTodoApp() {
       );
 
       if (firstAccessibleList) {
+        console.log("📋 Setting active list:", firstAccessibleList.name);
         setActiveListId(firstAccessibleList.id);
       }
     }
@@ -139,6 +155,7 @@ export default function CollaborativeTodoApp() {
         (list) => list.id === activeListId
       );
       if (!currentList || !firebaseData.canUserView(activeListId)) {
+        console.log("📋 Clearing inaccessible active list");
         setActiveListId(null);
       }
     }
@@ -150,7 +167,7 @@ export default function CollaborativeTodoApp() {
   ]);
 
   // Show loading screen while checking auth
-  if (loading) {
+  if (authLoading) {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
@@ -160,9 +177,11 @@ export default function CollaborativeTodoApp() {
             justifyContent: "center",
             alignItems: "center",
             height: "100vh",
+            flexDirection: "column",
           }}
         >
-          <CircularProgress />
+          <CircularProgress size={60} />
+          <Typography sx={{ mt: 2 }}>Loading...</Typography>
         </Box>
       </ThemeProvider>
     );
@@ -178,7 +197,7 @@ export default function CollaborativeTodoApp() {
     );
   }
 
-  // Show loading screen while Firebase data loads - NEW ADDITION
+  // Show loading screen while Firebase data loads
   if (firebaseData.loading) {
     return (
       <ThemeProvider theme={theme}>
@@ -192,14 +211,14 @@ export default function CollaborativeTodoApp() {
             height: "100vh",
           }}
         >
-          <CircularProgress />
-          <Box sx={{ mt: 2, textAlign: "center" }}>Loading your lists...</Box>
+          <CircularProgress size={60} />
+          <Typography sx={{ mt: 2 }}>Loading your lists...</Typography>
         </Box>
       </ThemeProvider>
     );
   }
 
-  // Show error if Firebase data failed to load - NEW ADDITION
+  // Show error if Firebase data failed to load
   if (firebaseData.error) {
     return (
       <ThemeProvider theme={theme}>
@@ -219,7 +238,7 @@ export default function CollaborativeTodoApp() {
             Failed to load data
           </Typography>
           <Typography variant="body1" color="text.secondary" paragraph>
-            Error: {firebaseData.error.message}
+            {firebaseData.error.userMessage || firebaseData.error.message}
           </Typography>
           <Button variant="contained" onClick={() => window.location.reload()}>
             Reload Page
@@ -240,6 +259,15 @@ export default function CollaborativeTodoApp() {
   // Apply filters and sorting to tasks
   const filteredTasks = currentTasks
     .filter((task) => {
+      // Search filter
+      if (searchTerm) {
+        const searchLower = searchTerm.toLowerCase();
+        const titleMatch = task.title?.toLowerCase().includes(searchLower);
+        const descMatch = task.description?.toLowerCase().includes(searchLower);
+        if (!titleMatch && !descMatch) return false;
+      }
+
+      // Status filter
       if (filters.status !== "all") {
         if (filters.status === "completed" && !task.done) return false;
         if (
@@ -254,10 +282,16 @@ export default function CollaborativeTodoApp() {
         )
           return false;
       }
+
+      // Priority filter
       if (filters.priority !== "all" && task.priority !== filters.priority)
         return false;
+
+      // Assignee filter
       if (filters.assignee !== "all" && task.assignedToUid !== filters.assignee)
         return false;
+
+      // Overdue filter
       if (filters.showOverdue) {
         if (
           !task.deadline ||
@@ -266,15 +300,24 @@ export default function CollaborativeTodoApp() {
         )
           return false;
       }
+
       return true;
     })
     .sort((a, b) => {
       let aVal = a[sortBy];
       let bVal = b[sortBy];
 
+      // Handle date sorting
       if (sortBy === "deadline" || sortBy === "createdAt") {
         aVal = aVal ? new Date(aVal).getTime() : 0;
         bVal = bVal ? new Date(bVal).getTime() : 0;
+      }
+
+      // Handle priority sorting (High > Medium > Low)
+      if (sortBy === "priority") {
+        const priorityOrder = { High: 3, Medium: 2, Low: 1 };
+        aVal = priorityOrder[aVal] || 0;
+        bVal = priorityOrder[bVal] || 0;
       }
 
       if (sortOrder === "asc") {
@@ -311,6 +354,7 @@ export default function CollaborativeTodoApp() {
     stats.totalTasks > 0
       ? Math.round((stats.completedTasks / stats.totalTasks) * 100)
       : 0;
+
   const unreadNotifications = firebaseData.notifications.filter((n) => !n.read);
 
   // Utility functions
@@ -376,7 +420,15 @@ export default function CollaborativeTodoApp() {
         <FilterMenu {...appProps} />
         <SortMenu {...appProps} />
         <NotificationSnackbar {...appProps} />
+        {/* <InvitationHandler 
+          user={user} 
+          showSnackbar={showSnackbar}
+        /> */}
       </Box>
     </ThemeProvider>
   );
+}
+
+export default function CollaborativeTodoApp() {
+  return <AppContent />;
 }

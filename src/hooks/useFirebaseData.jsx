@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   collection,
   doc,
@@ -13,6 +13,7 @@ import {
   arrayUnion,
   arrayRemove,
   serverTimestamp,
+  getDoc,
 } from "firebase/firestore";
 import { db } from "../Firebase/firebase";
 
@@ -25,7 +26,31 @@ export function useFirebaseData(user) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Real-time listeners
+  // Helper function to handle errors consistently
+  const handleError = useCallback((error, context) => {
+    console.error(`❌ Error in ${context}:`, error);
+    console.error(`❌ Error code: ${error.code}`);
+    console.error(`❌ Error message: ${error.message}`);
+
+    // Set a user-friendly error message
+    let userMessage = "An unexpected error occurred";
+    if (error.code === "permission-denied") {
+      userMessage = "You don't have permission to access this data";
+    } else if (error.code === "unavailable") {
+      userMessage = "Service temporarily unavailable. Please try again";
+    } else if (error.code === "not-found") {
+      userMessage = "The requested data was not found";
+    }
+
+    setError({
+      code: error.code,
+      message: error.message,
+      userMessage,
+      context,
+    });
+  }, []);
+
+  // Real-time listeners with improved error handling
   useEffect(() => {
     if (!user) {
       setLists([]);
@@ -34,14 +59,14 @@ export function useFirebaseData(user) {
       setNotifications([]);
       setMembers([]);
       setLoading(false);
+      setError(null);
       return;
     }
 
     console.log("🔍 Setting up Firebase listeners for user:", user.uid);
-    console.log("🔍 User email:", user.email);
-    console.log("🔍 User display name:", user.displayName);
 
     const unsubscribers = [];
+    let listsLoaded = false;
 
     // Listen to lists where user is a member
     const listsQuery = query(
@@ -50,22 +75,18 @@ export function useFirebaseData(user) {
       orderBy("createdAt", "desc")
     );
 
-    console.log("🔍 Starting lists query...");
-
     const unsubscribeLists = onSnapshot(
       listsQuery,
       (snapshot) => {
         console.log("📋 Lists snapshot received, size:", snapshot.size);
         const listsData = [];
+
         snapshot.forEach((doc) => {
           const listData = { id: doc.id, ...doc.data() };
           console.log("📋 List found:", {
             id: listData.id,
             name: listData.name,
-            ownerId: listData.ownerId,
-            memberIds: listData.memberIds,
-            userIsMember: listData.memberIds?.includes(user.uid),
-            userIsOwner: listData.ownerId === user.uid,
+            memberCount: listData.memberIds?.length || 0,
           });
           listsData.push(listData);
         });
@@ -73,9 +94,11 @@ export function useFirebaseData(user) {
         console.log("📋 Total lists loaded:", listsData.length);
         setLists(listsData);
         setError(null);
+        listsLoaded = true;
 
-        // Listen to tasks for each list
+        // Set up task and activity listeners for each list
         listsData.forEach((list) => {
+          // Tasks listener
           const tasksQuery = query(
             collection(db, "lists", list.id, "tasks"),
             orderBy("createdAt", "desc")
@@ -84,27 +107,30 @@ export function useFirebaseData(user) {
           const unsubscribeTasks = onSnapshot(
             tasksQuery,
             (tasksSnapshot) => {
-              console.log(
-                `📝 Tasks for list ${list.name}:`,
-                tasksSnapshot.size
-              );
               const tasksData = [];
               tasksSnapshot.forEach((taskDoc) => {
-                tasksData.push({ id: taskDoc.id, ...taskDoc.data() });
+                const taskData = { id: taskDoc.id, ...taskDoc.data() };
+                // Convert Firestore timestamps to Date objects
+                if (taskData.createdAt?.toDate) {
+                  taskData.createdAt = taskData.createdAt.toDate();
+                }
+                if (taskData.updatedAt?.toDate) {
+                  taskData.updatedAt = taskData.updatedAt.toDate();
+                }
+                tasksData.push(taskData);
               });
+
+              console.log(
+                `📝 Tasks for list ${list.name}: ${tasksData.length}`
+              );
               setTasks((prev) => ({ ...prev, [list.id]: tasksData }));
             },
-            (error) => {
-              console.error(
-                `❌ Error loading tasks for list ${list.id}:`,
-                error
-              );
-            }
+            (error) => handleError(error, `loading tasks for list ${list.id}`)
           );
 
           unsubscribers.push(unsubscribeTasks);
 
-          // Listen to activities for each list
+          // Activities listener
           const activitiesQuery = query(
             collection(db, "lists", list.id, "activities"),
             orderBy("createdAt", "desc")
@@ -113,37 +139,37 @@ export function useFirebaseData(user) {
           const unsubscribeActivities = onSnapshot(
             activitiesQuery,
             (activitiesSnapshot) => {
-              console.log(
-                `🔔 Activities for list ${list.name}:`,
-                activitiesSnapshot.size
-              );
               const activitiesData = [];
               activitiesSnapshot.forEach((activityDoc) => {
-                activitiesData.push({
+                const activityData = {
                   id: activityDoc.id,
                   ...activityDoc.data(),
-                });
+                };
+                // Convert Firestore timestamps
+                if (activityData.createdAt?.toDate) {
+                  activityData.createdAt = activityData.createdAt.toDate();
+                }
+                activitiesData.push(activityData);
               });
+
+              console.log(
+                `🔔 Activities for list ${list.name}: ${activitiesData.length}`
+              );
               setActivities((prev) => ({ ...prev, [list.id]: activitiesData }));
             },
-            (error) => {
-              console.error(
-                `❌ Error loading activities for list ${list.id}:`,
-                error
-              );
-            }
+            (error) =>
+              handleError(error, `loading activities for list ${list.id}`)
           );
 
           unsubscribers.push(unsubscribeActivities);
         });
 
-        setLoading(false);
+        if (listsLoaded) {
+          setLoading(false);
+        }
       },
       (error) => {
-        console.error("❌ Error loading lists:", error);
-        console.error("❌ Error code:", error.code);
-        console.error("❌ Error message:", error.message);
-        setError(error);
+        handleError(error, "loading lists");
         setLoading(false);
       }
     );
@@ -160,16 +186,19 @@ export function useFirebaseData(user) {
     const unsubscribeNotifications = onSnapshot(
       notificationsQuery,
       (snapshot) => {
-        console.log("🔔 Notifications loaded:", snapshot.size);
         const notificationsData = [];
         snapshot.forEach((doc) => {
-          notificationsData.push({ id: doc.id, ...doc.data() });
+          const notificationData = { id: doc.id, ...doc.data() };
+          // Convert timestamps
+          if (notificationData.createdAt?.toDate) {
+            notificationData.createdAt = notificationData.createdAt.toDate();
+          }
+          notificationsData.push(notificationData);
         });
+        console.log("🔔 Notifications loaded:", notificationsData.length);
         setNotifications(notificationsData);
       },
-      (error) => {
-        console.error("❌ Error loading notifications:", error);
-      }
+      (error) => handleError(error, "loading notifications")
     );
 
     unsubscribers.push(unsubscribeNotifications);
@@ -179,16 +208,22 @@ export function useFirebaseData(user) {
     const unsubscribeUsers = onSnapshot(
       usersQuery,
       (snapshot) => {
-        console.log("👥 Users loaded:", snapshot.size);
         const usersData = [];
         snapshot.forEach((doc) => {
-          usersData.push({ id: doc.id, ...doc.data() });
+          const userData = { id: doc.id, ...doc.data() };
+          // Convert timestamps
+          if (userData.createdAt?.toDate) {
+            userData.createdAt = userData.createdAt.toDate();
+          }
+          if (userData.lastLoginAt?.toDate) {
+            userData.lastLoginAt = userData.lastLoginAt.toDate();
+          }
+          usersData.push(userData);
         });
+        console.log("👥 Users loaded:", usersData.length);
         setMembers(usersData);
       },
-      (error) => {
-        console.error("❌ Error loading users:", error);
-      }
+      (error) => handleError(error, "loading users")
     );
 
     unsubscribers.push(unsubscribeUsers);
@@ -198,15 +233,14 @@ export function useFirebaseData(user) {
       console.log("🧹 Cleaning up Firebase listeners");
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [user]);
+  }, [user, handleError]);
 
-  // Helper functions for CRUD operations
+  // Helper functions for CRUD operations with improved error handling
   const createList = async (listData) => {
-    if (!user) return;
+    if (!user) throw new Error("User not authenticated");
 
     try {
       console.log("🆕 Creating list:", listData);
-      console.log("🆕 User creating list:", user.uid);
 
       const listPayload = {
         ...listData,
@@ -216,10 +250,7 @@ export function useFirebaseData(user) {
         createdAt: serverTimestamp(),
       };
 
-      console.log("🆕 List payload:", listPayload);
-
       const docRef = await addDoc(collection(db, "lists"), listPayload);
-
       console.log("✅ List created with ID:", docRef.id);
 
       // Log activity
@@ -231,20 +262,15 @@ export function useFirebaseData(user) {
         createdAt: serverTimestamp(),
       });
 
-      console.log("✅ Activity logged for new list");
-
       return docRef.id;
     } catch (error) {
-      console.error("❌ Error creating list:", error);
-      console.error("❌ Error code:", error.code);
-      console.error("❌ Error message:", error.message);
+      handleError(error, "creating list");
       throw error;
     }
   };
 
-  // ... rest of your CRUD operations remain the same ...
   const createTask = async (listId, taskData) => {
-    if (!user) return;
+    if (!user) throw new Error("User not authenticated");
 
     try {
       const docRef = await addDoc(collection(db, "lists", listId, "tasks"), {
@@ -276,13 +302,13 @@ export function useFirebaseData(user) {
 
       return docRef.id;
     } catch (error) {
-      console.error("Error creating task:", error);
+      handleError(error, "creating task");
       throw error;
     }
   };
 
   const updateTask = async (listId, taskId, taskData) => {
-    if (!user) return;
+    if (!user) throw new Error("User not authenticated");
 
     try {
       const taskRef = doc(db, "lists", listId, "tasks", taskId);
@@ -300,33 +326,29 @@ export function useFirebaseData(user) {
         createdAt: serverTimestamp(),
       });
 
-      // Create notification for all members when task is completed
-      if (taskData.done) {
-        const list = lists.find((l) => l.id === listId);
-        const otherMembers =
-          list?.memberIds.filter((id) => id !== user.uid) || [];
-
-        otherMembers.forEach(async (memberId) => {
-          await addDoc(collection(db, "notifications"), {
-            userId: memberId,
-            title: "Task Completed",
-            message: `${user.displayName || user.email} completed "${
-              taskData.title
-            }"`,
-            listId: listId,
-            read: false,
-            createdAt: serverTimestamp(),
-          });
+      // Create notification for completion
+      if (
+        taskData.done &&
+        taskData.assignedToUid &&
+        taskData.assignedToUid !== user.uid
+      ) {
+        await addDoc(collection(db, "notifications"), {
+          userId: taskData.assignedToUid,
+          title: "Task Completed",
+          message: `Task "${taskData.title}" was marked as complete`,
+          listId: listId,
+          read: false,
+          createdAt: serverTimestamp(),
         });
       }
     } catch (error) {
-      console.error("Error updating task:", error);
+      handleError(error, "updating task");
       throw error;
     }
   };
 
   const deleteTask = async (listId, taskId, taskTitle) => {
-    if (!user) return;
+    if (!user) throw new Error("User not authenticated");
 
     try {
       await deleteDoc(doc(db, "lists", listId, "tasks", taskId));
@@ -340,33 +362,44 @@ export function useFirebaseData(user) {
         createdAt: serverTimestamp(),
       });
     } catch (error) {
-      console.error("Error deleting task:", error);
+      handleError(error, "deleting task");
       throw error;
     }
   };
 
   const inviteMember = async (listId, email, role) => {
-    if (!user) return;
+    if (!user) throw new Error("User not authenticated");
 
     try {
       const list = lists.find((l) => l.id === listId);
       if (!list) throw new Error("List not found");
 
-      // Check user's role - only owners and editors can invite
+      // Check user's permissions
       const userRole = list.roles[user.uid];
       if (userRole !== "owner" && userRole !== "editor") {
         throw new Error("Insufficient permissions to invite members");
+      }
+
+      // Only owners can invite other owners
+      if (role === "owner" && userRole !== "owner") {
+        throw new Error("Only owners can invite other owners");
+      }
+
+      // Check if email is already a member
+      if (list.memberIds?.includes(email)) {
+        throw new Error("User is already a member of this list");
       }
 
       // Create pending invitation
       await addDoc(collection(db, "pendingInvitations"), {
         listId: listId,
         listName: list.name,
-        email: email,
+        email: email.toLowerCase(),
         role: role,
         invitedBy: user.uid,
         invitedByName: user.displayName || user.email,
         createdAt: serverTimestamp(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
       });
 
       // Log activity
@@ -377,25 +410,14 @@ export function useFirebaseData(user) {
         userPhoto: user.photoURL,
         createdAt: serverTimestamp(),
       });
-
-      // Here you would integrate with an email service like SendGrid or AWS SES
-      // For now, we'll create a notification for the inviter
-      await addDoc(collection(db, "notifications"), {
-        userId: user.uid,
-        title: "Invitation Sent",
-        message: `Invitation sent to ${email} for "${list.name}"`,
-        listId: listId,
-        read: false,
-        createdAt: serverTimestamp(),
-      });
     } catch (error) {
-      console.error("Error inviting member:", error);
+      handleError(error, "inviting member");
       throw error;
     }
   };
 
   const updateNotification = async (notificationId, updates) => {
-    if (!user) return;
+    if (!user) throw new Error("User not authenticated");
 
     try {
       const notificationRef = doc(db, "notifications", notificationId);
@@ -404,26 +426,35 @@ export function useFirebaseData(user) {
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
-      console.error("Error updating notification:", error);
+      handleError(error, "updating notification");
       throw error;
     }
   };
 
-  // Check user permissions for a list
-  const getUserRole = (listId) => {
-    const list = lists.find((l) => l.id === listId);
-    return list?.roles?.[user?.uid] || null;
-  };
+  // Permission helper functions
+  const getUserRole = useCallback(
+    (listId) => {
+      const list = lists.find((l) => l.id === listId);
+      return list?.roles?.[user?.uid] || null;
+    },
+    [lists, user]
+  );
 
-  const canUserEdit = (listId) => {
-    const role = getUserRole(listId);
-    return role === "owner" || role === "editor";
-  };
+  const canUserEdit = useCallback(
+    (listId) => {
+      const role = getUserRole(listId);
+      return role === "owner" || role === "editor";
+    },
+    [getUserRole]
+  );
 
-  const canUserView = (listId) => {
-    const list = lists.find((l) => l.id === listId);
-    return list?.memberIds?.includes(user?.uid) || false;
-  };
+  const canUserView = useCallback(
+    (listId) => {
+      const list = lists.find((l) => l.id === listId);
+      return list?.memberIds?.includes(user?.uid) || false;
+    },
+    [lists, user]
+  );
 
   return {
     lists,
@@ -432,7 +463,7 @@ export function useFirebaseData(user) {
     notifications,
     members,
     loading,
-    error, // Add error state
+    error,
     // CRUD operations
     createList,
     createTask,
