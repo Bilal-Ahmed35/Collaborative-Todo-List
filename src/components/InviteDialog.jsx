@@ -42,6 +42,7 @@ export default function InviteDialog({
   const [inviteRole, setInviteRole] = useState("editor");
   const [loading, setLoading] = useState(false);
   const [inviteMethod, setInviteMethod] = useState("email"); // 'email', 'link'
+  const [emailError, setEmailError] = useState(""); // Separate state for error message
 
   const userRole = getUserRole(activeListId);
 
@@ -50,19 +51,32 @@ export default function InviteDialog({
     return emailRegex.test(email);
   };
 
+  const handleEmailChange = (e) => {
+    const email = e.target.value;
+    setInviteEmail(email);
+
+    // Clear error when user starts typing
+    if (emailError) {
+      setEmailError("");
+    }
+  };
+
   const handleInviteMember = async () => {
     if (!inviteEmail.trim()) {
+      setEmailError("Email is required");
       showSnackbar("Email is required", "error");
       return;
     }
 
     if (!validateEmail(inviteEmail.trim())) {
+      setEmailError("Please enter a valid email address");
       showSnackbar("Please enter a valid email address", "error");
       return;
     }
 
     // Check if user is already a member
     if (currentList?.memberIds?.includes(inviteEmail.trim())) {
+      setEmailError("User is already a member of this list");
       showSnackbar("User is already a member of this list", "error");
       return;
     }
@@ -144,7 +158,14 @@ export default function InviteDialog({
   };
 
   const copyInviteLink = async () => {
-    if (!inviteEmail.trim() || !validateEmail(inviteEmail.trim())) {
+    if (!inviteEmail.trim()) {
+      setEmailError("Please enter a valid email address first");
+      showSnackbar("Please enter a valid email address first", "error");
+      return;
+    }
+
+    if (!validateEmail(inviteEmail.trim())) {
+      setEmailError("Please enter a valid email address first");
       showSnackbar("Please enter a valid email address first", "error");
       return;
     }
@@ -169,6 +190,7 @@ export default function InviteDialog({
     setInviteEmail("");
     setInviteRole("editor");
     setInviteMethod("email");
+    setEmailError(""); // Clear error state
     setInviteOpen(false);
   };
 
@@ -186,6 +208,8 @@ export default function InviteDialog({
   };
 
   const isEmailAvailable = isEmailServiceAvailable();
+  const hasEmailError = Boolean(emailError);
+  const isValidEmail = inviteEmail.trim() && validateEmail(inviteEmail.trim());
 
   return (
     <Dialog open={inviteOpen} onClose={handleClose} maxWidth="sm" fullWidth>
@@ -211,15 +235,14 @@ export default function InviteDialog({
             <TextField
               label="Email Address *"
               value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
+              onChange={handleEmailChange}
               fullWidth
               type="email"
               required
-              error={inviteEmail && !validateEmail(inviteEmail)}
+              error={hasEmailError} // Boolean value
               helperText={
-                inviteEmail && !validateEmail(inviteEmail)
-                  ? "Please enter a valid email address"
-                  : "Enter the email address of the person you want to invite"
+                emailError || // Show error message if there is one
+                "Enter the email address of the person you want to invite"
               }
               disabled={loading}
             />
@@ -334,9 +357,7 @@ export default function InviteDialog({
           <Button
             variant="contained"
             onClick={handleInviteMember}
-            disabled={
-              !inviteEmail.trim() || !validateEmail(inviteEmail) || loading
-            }
+            disabled={!isValidEmail || hasEmailError || loading}
           >
             {loading
               ? "Sending..."

@@ -59,7 +59,7 @@ export default function InvitationHandler({
         "error"
       );
       // Clear URL parameters
-      window.history.replaceState({}, document.title, window.location.pathname);
+      clearUrlParams();
       return;
     }
 
@@ -70,17 +70,13 @@ export default function InvitationHandler({
       const q = query(
         pendingInvitationsRef,
         where("listId", "==", listId),
-        where("email", "==", email)
+        where("email", "==", email.toLowerCase())
       );
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
         showSnackbar("Invitation not found or has expired.", "error");
-        window.history.replaceState(
-          {},
-          document.title,
-          window.location.pathname
-        );
+        clearUrlParams();
         return;
       }
 
@@ -95,11 +91,7 @@ export default function InvitationHandler({
         showSnackbar("The list you were invited to no longer exists.", "error");
         // Clean up the pending invitation
         await deleteDoc(invitationDoc.ref);
-        window.history.replaceState(
-          {},
-          document.title,
-          window.location.pathname
-        );
+        clearUrlParams();
         return;
       }
 
@@ -108,14 +100,10 @@ export default function InvitationHandler({
       // Check if user is already a member
       if (listData.memberIds?.includes(user.uid)) {
         showSnackbar("You are already a member of this list.", "info");
-        setActiveListId(listId);
+        setActiveListId && setActiveListId(listId);
         // Clean up the pending invitation
         await deleteDoc(invitationDoc.ref);
-        window.history.replaceState(
-          {},
-          document.title,
-          window.location.pathname
-        );
+        clearUrlParams();
         return;
       }
 
@@ -125,16 +113,26 @@ export default function InvitationHandler({
         listName: listData.name,
         listDescription: listData.description,
         invitationDocRef: invitationDoc.ref,
+        invitationId: invitationDoc.id,
       });
       setDialogOpen(true);
     } catch (error) {
       console.error("Error processing invitation:", error);
-      showSnackbar("Failed to process invitation.", "error");
+      if (error.code === "permission-denied") {
+        showSnackbar(
+          "Unable to access invitation. Please try signing out and back in.",
+          "error"
+        );
+      } else {
+        showSnackbar("Failed to process invitation.", "error");
+      }
     } finally {
       setLoading(false);
-      // Clear URL parameters
-      window.history.replaceState({}, document.title, window.location.pathname);
     }
+  };
+
+  const clearUrlParams = () => {
+    window.history.replaceState({}, document.title, window.location.pathname);
   };
 
   const acceptInvitation = async () => {
@@ -186,11 +184,18 @@ export default function InvitationHandler({
       await deleteDoc(inviteData.invitationDocRef);
 
       showSnackbar(`Welcome to "${inviteData.listName}"!`, "success");
-      setActiveListId(inviteData.listId);
+      setActiveListId && setActiveListId(inviteData.listId);
       setDialogOpen(false);
     } catch (error) {
       console.error("Error accepting invitation:", error);
-      showSnackbar("Failed to accept invitation.", "error");
+      if (error.code === "permission-denied") {
+        showSnackbar(
+          "Permission denied. Please check your Firebase security rules.",
+          "error"
+        );
+      } else {
+        showSnackbar("Failed to accept invitation.", "error");
+      }
     } finally {
       setProcessing(false);
     }
@@ -201,9 +206,6 @@ export default function InvitationHandler({
 
     setProcessing(true);
     try {
-      // Delete the pending invitation
-      await deleteDoc(inviteData.invitationDocRef);
-
       // Notify the inviter about the declined invitation
       if (inviteData.invitedBy !== user.uid) {
         await addDoc(collection(db, "notifications"), {
@@ -217,6 +219,9 @@ export default function InvitationHandler({
           createdAt: serverTimestamp(),
         });
       }
+
+      // Delete the pending invitation
+      await deleteDoc(inviteData.invitationDocRef);
 
       showSnackbar("Invitation declined.", "info");
       setDialogOpen(false);

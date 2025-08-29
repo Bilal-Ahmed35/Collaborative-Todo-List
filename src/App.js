@@ -10,7 +10,6 @@ import {
 } from "@mui/material";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./Firebase/firebase";
-// import ErrorBoundary from "./components/ErrorBoundary";
 import LoginScreen from "./components/LoginScreen";
 import AppHeader from "./components/AppHeader";
 import Sidebar from "./components/Sidebar";
@@ -21,7 +20,7 @@ import InviteDialog from "./components/InviteDialog";
 import FilterMenu from "./components/FilterMenu";
 import SortMenu from "./components/SortMenu";
 import NotificationSnackbar from "./components/NotificationSnackbar";
-// import InvitationHandler from "./components/InvitationHandler";
+import InvitationHandler from "./components/InvitationHandler";
 import { useFirebaseData } from "./hooks/useFirebaseData";
 
 const drawerWidth = 300;
@@ -420,10 +419,11 @@ function AppContent() {
         <FilterMenu {...appProps} />
         <SortMenu {...appProps} />
         <NotificationSnackbar {...appProps} />
-        {/* <InvitationHandler 
-          user={user} 
+        <InvitationHandler
+          user={user}
           showSnackbar={showSnackbar}
-        /> */}
+          setActiveListId={setActiveListId}
+        />
       </Box>
     </ThemeProvider>
   );
