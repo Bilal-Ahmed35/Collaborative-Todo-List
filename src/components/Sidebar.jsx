@@ -1,143 +1,297 @@
 import React from "react";
 import {
-  Box,
   Drawer,
-  Toolbar,
   List,
+  ListItem,
   ListItemButton,
   ListItemText,
+  ListItemIcon,
   Typography,
-  IconButton,
-  Grid,
-  Card,
-  LinearProgress,
-  Tooltip,
+  Box,
+  Button,
+  Divider,
   Chip,
-  Alert,
+  Card,
+  CardContent,
+  LinearProgress,
 } from "@mui/material";
-import { Add as AddIcon } from "@mui/icons-material";
-import { formatDate, isOverdue } from "../utils/helpers";
+import {
+  List as ListIcon,
+  Add as AddIcon,
+  People as PeopleIcon,
+  CheckCircle as CheckCircleIcon,
+  Schedule as ScheduleIcon,
+} from "@mui/icons-material";
+import { formatDate } from "../utils/helpers";
 
 export default function Sidebar({
-  drawerWidth,
-  stats,
-  completionRate,
-  filteredLists,
+  user,
   activeListId,
   setActiveListId,
+  lists,
+  filteredLists,
   setCreateListOpen,
+  stats,
+  completionRate,
+  drawerWidth,
+  canUserView,
 }) {
+  const handleListClick = (listId) => {
+    if (!canUserView(listId)) {
+      console.warn("User cannot view list:", listId);
+      return;
+    }
+    setActiveListId(listId);
+  };
+
+  const getRoleColor = (role) => {
+    switch (role) {
+      case "owner":
+        return "error";
+      case "editor":
+        return "warning";
+      case "viewer":
+        return "info";
+      default:
+        return "default";
+    }
+  };
+
   return (
     <Drawer
       variant="permanent"
       sx={{
         width: drawerWidth,
+        flexShrink: 0,
         "& .MuiDrawer-paper": {
           width: drawerWidth,
           boxSizing: "border-box",
-          top: 64,
+          mt: 8,
         },
       }}
     >
-      <Toolbar />
-      <Box sx={{ p: 2 }}>
-        {/* Stats Cards */}
-        <Grid container spacing={1} sx={{ mb: 3 }}>
-          <Grid item xs={6}>
-            <Card sx={{ textAlign: "center", p: 1 }}>
-              <Typography variant="h6" color="primary">
-                {stats.totalTasks}
+      <Box sx={{ overflow: "auto", p: 2 }}>
+        {/* User Info */}
+        <Card sx={{ mb: 2 }}>
+          <CardContent sx={{ pb: "16px !important" }}>
+            <Typography variant="h6" gutterBottom>
+              Welcome back!
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {user.displayName || user.email}
+            </Typography>
+          </CardContent>
+        </Card>
+
+        {/* Quick Stats */}
+        {activeListId && (
+          <Card sx={{ mb: 2 }}>
+            <CardContent sx={{ pb: "16px !important" }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Current List Stats
               </Typography>
-              <Typography variant="caption">Total Tasks</Typography>
-            </Card>
-          </Grid>
-          <Grid item xs={6}>
-            <Card sx={{ textAlign: "center", p: 1 }}>
-              <Typography variant="h6" color="success.main">
-                {stats.completedTasks}
-              </Typography>
-              <Typography variant="caption">Completed</Typography>
-            </Card>
-          </Grid>
-          <Grid item xs={12}>
-            <Card sx={{ p: 1 }}>
-              <Typography variant="body2" gutterBottom>
-                Progress: {completionRate}%
-              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
+                <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                  Progress
+                </Typography>
+                <Typography variant="body2" color="primary">
+                  {completionRate}%
+                </Typography>
+              </Box>
               <LinearProgress
                 variant="determinate"
                 value={completionRate}
-                sx={{ height: 6, borderRadius: 3 }}
+                sx={{ mb: 2, height: 6, borderRadius: 3 }}
               />
-            </Card>
-          </Grid>
-        </Grid>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 1,
+                  "& > div": {
+                    textAlign: "center",
+                    p: 1,
+                    borderRadius: 1,
+                    bgcolor: "action.hover",
+                  },
+                }}
+              >
+                <Box>
+                  <Typography variant="h6" color="success.main">
+                    {stats.completedTasks}
+                  </Typography>
+                  <Typography variant="caption">Done</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="h6" color="warning.main">
+                    {stats.pendingTasks}
+                  </Typography>
+                  <Typography variant="caption">Pending</Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        )}
 
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            mb: 2,
-          }}
+        {/* Create List Button */}
+        <Button
+          fullWidth
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => setCreateListOpen(true)}
+          sx={{ mb: 2 }}
         >
-          <Typography variant="subtitle1" fontWeight="bold">
-            Your Lists ({filteredLists.length})
-          </Typography>
-          <Tooltip title="Create new list">
-            <IconButton size="small" onClick={() => setCreateListOpen(true)}>
-              <AddIcon />
-            </IconButton>
-          </Tooltip>
-        </Box>
+          New List
+        </Button>
 
-        <List sx={{ maxHeight: 400, overflow: "auto" }}>
-          {filteredLists.map((list) => (
-            <ListItemButton
-              key={list.id}
-              selected={list.id === activeListId}
-              onClick={() => setActiveListId(list.id)}
-              sx={{ borderRadius: 1, mb: 0.5 }}
-            >
-              <ListItemText
-                primary={list.name}
-                secondary={
-                  <Box>
-                    {list.description && (
-                      <Typography variant="caption" display="block">
-                        {list.description.substring(0, 50)}
-                        {list.description.length > 50 && "..."}
+        <Divider sx={{ my: 2 }} />
+
+        {/* Lists */}
+        <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+          Your Lists ({filteredLists.length})
+        </Typography>
+
+        <List>
+          {filteredLists.map((list) => {
+            const userRole = list.roles?.[user.uid] || "viewer";
+            const isActive = activeListId === list.id;
+            const canView = canUserView(list.id);
+
+            if (!canView) return null;
+
+            return (
+              <ListItem key={list.id} disablePadding sx={{ mb: 0.5 }}>
+                <ListItemButton
+                  selected={isActive}
+                  onClick={() => handleListClick(list.id)}
+                  sx={{
+                    borderRadius: 1,
+                    "&.Mui-selected": {
+                      bgcolor: "primary.main",
+                      color: "primary.contrastText",
+                      "&:hover": {
+                        bgcolor: "primary.dark",
+                      },
+                      "& .MuiChip-root": {
+                        bgcolor: "rgba(255,255,255,0.2)",
+                        color: "inherit",
+                      },
+                    },
+                  }}
+                >
+                  <ListItemIcon
+                    sx={{
+                      color: isActive ? "inherit" : "action.active",
+                      minWidth: 40,
+                    }}
+                  >
+                    <ListIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={list.name}
+                    secondary={
+                      // FIXED: Wrap in Typography with component="div"
+                      <Typography
+                        component="div"
+                        variant="caption"
+                        sx={{ mt: 0.5, display: "block" }}
+                      >
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            mb: 0.5,
+                          }}
+                        >
+                          <Chip
+                            label={userRole}
+                            size="small"
+                            color={getRoleColor(userRole)}
+                            sx={{ fontSize: "0.6rem", height: 18 }}
+                          />
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: isActive
+                                ? "rgba(255,255,255,0.7)"
+                                : "text.secondary",
+                            }}
+                          >
+                            {list.memberIds?.length || 1} members
+                          </Typography>
+                        </Box>
+                        {list.dueDate && (
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: isActive
+                                ? "rgba(255,255,255,0.7)"
+                                : "text.secondary",
+                            }}
+                          >
+                            Due: {formatDate(list.dueDate)}
+                          </Typography>
+                        )}
                       </Typography>
-                    )}
-                    <Box sx={{ display: "flex", gap: 0.5, mt: 0.5 }}>
-                      <Chip
-                        size="small"
-                        label={`${list.memberIds?.length || 0} members`}
-                        variant="outlined"
-                      />
-                      {list.dueDate && (
-                        <Chip
-                          size="small"
-                          label={formatDate(list.dueDate)}
-                          color={isOverdue(list.dueDate) ? "error" : "default"}
-                        />
-                      )}
-                    </Box>
-                  </Box>
+                    }
+                  />
+                </ListItemButton>
+              </ListItem>
+            );
+          })}
+
+          {filteredLists.length === 0 && (
+            <ListItem>
+              <ListItemText
+                primary={
+                  <Typography color="text.secondary" align="center">
+                    {lists.length === 0
+                      ? "No lists yet"
+                      : "No lists match your search"}
+                  </Typography>
                 }
               />
-            </ListItemButton>
-          ))}
+            </ListItem>
+          )}
         </List>
 
-        {/* Upcoming Deadlines Alert */}
-        {stats.upcomingDeadlines > 0 && (
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            <Typography variant="body2">
-              {stats.upcomingDeadlines} task
-              {stats.upcomingDeadlines > 1 ? "s" : ""} due this week
+        {/* Quick Actions */}
+        {lists.length > 0 && (
+          <>
+            <Divider sx={{ my: 2 }} />
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Quick Stats
             </Typography>
-          </Alert>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <CheckCircleIcon color="success" fontSize="small" />
+                <Typography variant="body2">
+                  {lists.reduce(
+                    (acc, list) =>
+                      acc +
+                      (stats.totalTasks > 0 && list.id === activeListId
+                        ? stats.completedTasks
+                        : 0),
+                    0
+                  )}{" "}
+                  tasks completed today
+                </Typography>
+              </Box>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <PeopleIcon color="info" fontSize="small" />
+                <Typography variant="body2">
+                  Member of {lists.length} list{lists.length !== 1 ? "s" : ""}
+                </Typography>
+              </Box>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <ScheduleIcon color="warning" fontSize="small" />
+                <Typography variant="body2">
+                  {stats.upcomingDeadlines} upcoming deadlines
+                </Typography>
+              </Box>
+            </Box>
+          </>
         )}
       </Box>
     </Drawer>

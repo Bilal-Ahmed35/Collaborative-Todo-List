@@ -29,25 +29,37 @@ if (missingKeys.length > 0) {
   );
 }
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
+
+// Initialize Auth
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-export const db = getFirestore(app);
+
+// Initialize Firestore
+const db = getFirestore(app);
 
 // Configure Google provider
 googleProvider.setCustomParameters({
   prompt: "select_account",
 });
 
-// Development emulator setup (optional)
+// Development emulator setup - MUST happen before any Firestore operations
+let isEmulatorConnected = false;
 if (
   process.env.NODE_ENV === "development" &&
-  process.env.REACT_APP_USE_EMULATOR === "true"
+  process.env.REACT_APP_USE_EMULATOR === "true" &&
+  !isEmulatorConnected
 ) {
   try {
     connectFirestoreEmulator(db, "localhost", 8080);
+    isEmulatorConnected = true;
     console.log("🔧 Connected to Firestore emulator");
   } catch (error) {
     console.log("⚠️ Firestore emulator connection failed:", error.message);
+    // Don't throw error, just log it and continue with production
   }
 }
+
+// Export db after emulator connection
+export { db };

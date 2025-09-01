@@ -17,6 +17,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  ListItemText,
+  ListItemAvatar,
 } from "@mui/material";
 import {
   Search as SearchIcon,
@@ -24,6 +26,8 @@ import {
   DarkMode as DarkModeIcon,
   LightMode as LightModeIcon,
   Logout as LogoutIcon,
+  NotificationsNone as NotificationsNoneIcon,
+  Circle as CircleIcon,
 } from "@mui/icons-material";
 import { signOut } from "firebase/auth";
 import { auth } from "../Firebase/firebase";
@@ -46,22 +50,26 @@ export default function AppHeader({
   const markNotificationAsRead = async (notificationId) => {
     try {
       await updateNotification(notificationId, { read: true });
+      console.log("✅ Notification marked as read:", notificationId);
     } catch (error) {
-      console.error("Error marking notification as read:", error);
+      console.error("❌ Error marking notification as read:", error);
     }
   };
 
   const markAllNotificationsAsRead = async () => {
     try {
       const unreadNotifs = notifications.filter((n) => !n.read);
-      await Promise.all(
-        unreadNotifs.map((notif) =>
-          updateNotification(notif.id, { read: true })
-        )
+      console.log("📤 Marking all notifications as read:", unreadNotifs.length);
+
+      const promises = unreadNotifs.map((notif) =>
+        updateNotification(notif.id, { read: true })
       );
+
+      await Promise.all(promises);
       setNotificationAnchor(null);
+      console.log("✅ All notifications marked as read");
     } catch (error) {
-      console.error("Error marking all notifications as read:", error);
+      console.error("❌ Error marking all notifications as read:", error);
     }
   };
 
@@ -73,6 +81,45 @@ export default function AppHeader({
       console.error("Sign out error:", error);
     }
   };
+
+  const handleNotificationClick = (notification) => {
+    // Mark as read when clicked
+    if (!notification.read) {
+      markNotificationAsRead(notification.id);
+    }
+    // Close menu after a short delay to show the read state change
+    setTimeout(() => {
+      setNotificationAnchor(null);
+    }, 300);
+  };
+
+  const getNotificationIcon = (notification) => {
+    if (notification.type === "invitation") return "🎉";
+    if (notification.type === "task_assignment") return "📝";
+    if (notification.type === "task_completion") return "✅";
+    if (notification.type === "welcome") return "👋";
+    if (notification.type === "invitation_accepted") return "🤝";
+    if (notification.type === "invitation_declined") return "❌";
+    return "🔔";
+  };
+
+  // Sort notifications by date, unread first
+  const sortedNotifications = [...notifications].sort((a, b) => {
+    // Unread notifications first
+    if (a.read !== b.read) {
+      return a.read ? 1 : -1;
+    }
+    // Then by date (newest first)
+    const dateA = a.createdAt || new Date(0);
+    const dateB = b.createdAt || new Date(0);
+    return dateB.getTime() - dateA.getTime();
+  });
+
+  console.log("🔔 Notifications in header:", {
+    total: notifications.length,
+    unread: unreadNotifications.length,
+    sorted: sortedNotifications.length,
+  });
 
   return (
     <>
@@ -105,12 +152,16 @@ export default function AppHeader({
           />
 
           {/* Notifications */}
-          <Tooltip title="Notifications">
+          <Tooltip title={`${unreadNotifications.length} unread notifications`}>
             <IconButton
               color="inherit"
               onClick={(e) => setNotificationAnchor(e.currentTarget)}
             >
-              <Badge badgeContent={unreadNotifications.length} color="error">
+              <Badge
+                badgeContent={unreadNotifications.length}
+                color="error"
+                max={99}
+              >
                 <NotificationsIcon />
               </Badge>
             </IconButton>
@@ -145,48 +196,147 @@ export default function AppHeader({
         anchorEl={notificationAnchor}
         open={Boolean(notificationAnchor)}
         onClose={() => setNotificationAnchor(null)}
-        PaperProps={{ sx: { width: 350, maxHeight: 400 } }}
+        PaperProps={{
+          sx: {
+            width: 380,
+            maxHeight: 500,
+            "& .MuiMenuItem-root": {
+              whiteSpace: "normal",
+              minHeight: "auto",
+            },
+          },
+        }}
+        anchorOrigin={{
+          vertical: "bottom",
+          horizontal: "right",
+        }}
+        transformOrigin={{
+          vertical: "top",
+          horizontal: "right",
+        }}
       >
+        {/* Header */}
         <Box
           sx={{
             p: 2,
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            borderBottom: 1,
+            borderColor: "divider",
           }}
         >
           <Typography variant="h6">Notifications</Typography>
           {unreadNotifications.length > 0 && (
-            <Button size="small" onClick={markAllNotificationsAsRead}>
+            <Button
+              size="small"
+              onClick={markAllNotificationsAsRead}
+              variant="outlined"
+            >
               Mark all read
             </Button>
           )}
         </Box>
-        <Divider />
-        {unreadNotifications.length === 0 ? (
-          <MenuItem>
-            <Typography color="text.secondary">No new notifications</Typography>
-          </MenuItem>
-        ) : (
-          unreadNotifications.map((notif) => (
-            <MenuItem
-              key={notif.id}
-              onClick={() => markNotificationAsRead(notif.id)}
-              sx={{ whiteSpace: "normal", py: 1.5 }}
-            >
-              <Box>
-                <Typography variant="body2" fontWeight="bold">
-                  {notif.title}
-                </Typography>
+
+        {/* Notifications List */}
+        <Box sx={{ maxHeight: 400, overflowY: "auto" }}>
+          {sortedNotifications.length === 0 ? (
+            <MenuItem disabled>
+              <Box sx={{ textAlign: "center", py: 2, width: "100%" }}>
+                <NotificationsNoneIcon
+                  sx={{ fontSize: 48, color: "text.secondary", mb: 1 }}
+                />
                 <Typography variant="body2" color="text.secondary">
-                  {notif.message}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {formatDate(notif.createdAt)}
+                  No notifications yet
                 </Typography>
               </Box>
             </MenuItem>
-          ))
+          ) : (
+            sortedNotifications.map((notif) => (
+              <MenuItem
+                key={notif.id}
+                onClick={() => handleNotificationClick(notif)}
+                sx={{
+                  py: 1.5,
+                  px: 2,
+                  borderLeft: !notif.read
+                    ? "3px solid"
+                    : "3px solid transparent",
+                  borderColor: !notif.read ? "primary.main" : "transparent",
+                  bgcolor: !notif.read ? "action.hover" : "transparent",
+                  "&:hover": {
+                    bgcolor: !notif.read ? "action.selected" : "action.hover",
+                  },
+                }}
+              >
+                <ListItemAvatar sx={{ minWidth: 40 }}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "1.5rem",
+                    }}
+                  >
+                    {getNotificationIcon(notif)}
+                  </Box>
+                </ListItemAvatar>
+                <ListItemText
+                  primary={
+                    <Box
+                      sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}
+                    >
+                      <Typography
+                        variant="body2"
+                        fontWeight={!notif.read ? "bold" : "normal"}
+                        sx={{ flexGrow: 1 }}
+                      >
+                        {notif.title}
+                      </Typography>
+                      {!notif.read && (
+                        <CircleIcon
+                          sx={{
+                            fontSize: 8,
+                            color: "primary.main",
+                            mt: 0.5,
+                          }}
+                        />
+                      )}
+                    </Box>
+                  }
+                  secondary={
+                    <Box>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ mb: 0.5 }}
+                      >
+                        {notif.message}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {formatDate(notif.createdAt)}
+                      </Typography>
+                    </Box>
+                  }
+                />
+              </MenuItem>
+            ))
+          )}
+        </Box>
+
+        {notifications.length > 10 && (
+          <Box
+            sx={{
+              p: 1,
+              textAlign: "center",
+              borderTop: 1,
+              borderColor: "divider",
+            }}
+          >
+            <Typography variant="caption" color="text.secondary">
+              Showing recent notifications
+            </Typography>
+          </Box>
         )}
       </Menu>
 
